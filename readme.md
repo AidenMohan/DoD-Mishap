@@ -1,4 +1,3 @@
-
 # The DoD Mishap: How I Found a Critical Crypto Vulnerability in Military Healthcare Apps and Spent Five Months Being Ignored
 
 ---
@@ -7,19 +6,19 @@
 
 I'm Aiden. I'm 14. I started doing bug bounty and vulnerability disclosure in May 2026 because I thought it'd be fun. It was and is! Until I found something real, and the system that's supposed to handle it fell apart at every step.
 
-This is the full story of how I found a cryptographic vulnerability in a U.S. Department of Defense healthcare authentication library, reported it properly, got dismissed, escalated it to MITRE, got ghosted, escalated it to CISA, got confirmed — and still ended up with nothing.
+This is the full story of how I found a cryptographic vulnerability in a U.S. Department of Defense healthcare authentication library, reported it properly, got dismissed, escalated it to MITRE, got ghosted, escalated it to CISA, got confirmed, and still ended up with nothing.
 
 Every date, every message, every response (and non-response) is real. I'm publishing this because CISA explicitly told me I'm free to share my findings, and because I think people need to see what independent vulnerability reporting actually looks like in 2026.
 
+I was writing this with pure rage in my heart.
 
-I might be writing this with pure rage
 ---
 
 ## The Finding
 
 In June 2026, I was looking at `mobile.health.mil`, the U.S. Department of Defense's mobile health platform. Specifically, the MWIST (Military WIC Screening Tool) progressive web app.
 
-The first thing I noticed was that JavaScript source maps were publicly accessible. The main source map was 6.5MB and contained 225 unminified source files — application components, authentication logic, route guards, eligibility screening algorithms, everything. That shouldn't be in production.
+The first thing I noticed was that JavaScript source maps were publicly accessible. The main source map was 6.5MB and contained 225 unminified source files: application components, authentication logic, route guards, eligibility screening algorithms, everything. That shouldn't be in production.
 
 But the source maps were just the entry point. What they revealed was worse.
 
@@ -27,7 +26,7 @@ The MWIST app uses an npm package called `dha-encryption` (via `dha-login`) for 
 
 ### 1. Hardcoded Default Salt
 
-The `getKeyFromPassword()` function uses `"h0n3yp0t!@"` as the default PBKDF2 salt. If developers don't override the `seed` parameter — and the production apps don't — every deployment shares the same salt.
+The `getKeyFromPassword()` function uses `"h0n3yp0t!@"` as the default PBKDF2 salt. If developers don't override the `seed` parameter, and the production apps don't, every deployment shares the same salt.
 
 ```
 async function getKeyFromPassword(t, e = "h0n3yp0t!@") {
@@ -36,7 +35,7 @@ async function getKeyFromPassword(t, e = "h0n3yp0t!@") {
 You can confirm this yourself against the live production bundle:
 
 ```bash
-curl -sk "https://mobile.health.mil/mobile_apps/mwist/assets/index-CEo-9ZJ1.js" | grep -oP '.{0,30}h0n3yp0t.{0,30}'
+curl -sk "https://mobile.health.mil/mobile_apps/mwist/assets/index-Dad7YiSA.js" | grep -oP '.{0,30}h0n3yp0t.{0,30}'
 ```
 
 ### 2. 1,337 PBKDF2 Iterations
@@ -51,7 +50,7 @@ The AES-256-GCM key and IV are both derived from the same PBKDF2 output:
 PBKDF2(password, salt, 1337, 384 bits) → first 256 bits = AES key, last 128 bits = IV
 ```
 
-Same password + same salt = same IV, every time. Reusing a nonce with AES-GCM is a known catastrophic failure — it destroys the authentication tag guarantee and enables plaintext recovery.
+Same password + same salt = same IV, every time. Reusing a nonce with AES-GCM is a known catastrophic failure. It destroys the authentication tag guarantee and enables plaintext recovery.
 
 ### The Impact
 
@@ -65,20 +64,20 @@ No server interaction required. Entirely offline.
 
 And this isn't limited to one app. I confirmed the same vulnerable auth flow in at least four DHA progressive web apps:
 
-- **MWIST** — `mobile.health.mil/mobile_apps/mwist/`
-- **DRES** — `mobile.health.mil/mobile_apps/dres/`
-- **AFMSSLW** — `mobile.health.mil/mobile_apps/afmsslw/`
-- **Biodefense** — `mobile.health.mil/mobile_apps/biodefense/`
+- **MWIST** : `mobile.health.mil/mobile_apps/mwist/`
+- **DRES** : `mobile.health.mil/mobile_apps/dres/`
+- **AFMSSLW** : `mobile.health.mil/mobile_apps/afmsslw/`
+- **Biodefense** : `mobile.health.mil/mobile_apps/biodefense/`
 
 All four contain the same hardcoded salt, the same 1,337 iterations, and the same deterministic IV derivation. The `dha-encryption` package is the common dependency, and the latest published version (v3.3.1, March 2024) still has all three weaknesses.
 
-These apps handle sensitive data for military families — WIC eligibility screening, which includes income, rank, family size, and pregnancy status.
+These apps handle sensitive data for military families. WIC eligibility screening, which includes income, rank, family size, and pregnancy status.
 
 I built a full proof-of-concept that demonstrates all three weaknesses using only the public npm package: [github.com/AidenMohan/dha-encryption-3.3.1-poc](https://github.com/AidenMohan/dha-encryption-3.3.1-poc)
 
 ---
 
-## The Report — and the Response
+## The Report, and the Response
 
 ### June 16, 2026: HackerOne Report to DoD VDP
 
@@ -106,7 +105,7 @@ The triager came back with:
 
 > "We do not take brute forcing issues, can you confirm that this domain has a login portal?"
 
-This is where the disconnect became clear. The triager was treating this as a brute-force login attack against a web form. It's not. It's a **cryptographic failure** — the attack happens entirely offline against encrypted data that's already been extracted. There is no login portal involved. The attacker never contacts the server.
+This is where the disconnect became clear. The triager was treating this as a brute-force login attack against a web form. It's not. It's a **cryptographic failure**. The attack happens entirely offline against encrypted data that's already been extracted. There is no login portal involved. The attacker never contacts the server.
 
 I explained this again, with the curl command showing the hardcoded salt in the production JavaScript, and the distinction between "brute-forcing a login" and "brute-forcing weak encryption offline."
 
@@ -116,7 +115,7 @@ After I provided additional confirmation that the same vulnerability existed acr
 
 > "Proof needs to be provided to confirm vulnerability, no proof is provided that the attacker is able to gather health data or use the salt/brute forced pin code to gain sensitive information, closing as informative."
 
-The vulnerability was confirmed in the production source code. The PoC demonstrated full PIN recovery in 13 seconds. The hardcoded salt was visible in the live JavaScript bundle. But because I couldn't — without breaking the law — log into a military healthcare application and extract my own encrypted data to brute-force, the report was dismissed.
+The vulnerability was confirmed in the production source code. The PoC demonstrated full PIN recovery in 13 seconds. The hardcoded salt was visible in the live JavaScript bundle. But because I couldn't, without breaking the law, log into a military healthcare application and extract my own encrypted data to brute-force, the report was dismissed.
 
 ---
 
@@ -148,9 +147,9 @@ No response.
 
 ### October 2: Silent Denial
 
-What I didn't know at the time — and only discovered later by digging through MITRE's public CVE request tooling — was that on October 2, my CVE request was silently denied. The `x_Denied` flag was set to `true` in the record. Nobody told me. (even though they were meant to email on any updates)
+What I didn't know at the time, and only discovered later by digging through MITRE's public CVE request tooling, was that on October 2, my CVE request was silently denied. The `x_Denied` flag was set to `true` in the record. Nobody told me. Even though they were meant to email on any updates.
 
-The record that MITRE themselves had created — with the CVSS score, the CWE classification, the in-scope confirmation — was rejected without any communication to me.
+The record that MITRE themselves had created, with the CVSS score, the CWE classification, the in-scope confirmation, was rejected without any communication to me.
 
 I found this out by looking at my own request data at [mitre.github.io/mitre-cve-roles/cve-id-request](https://mitre.github.io/mitre-cve-roles/cve-id-request/#source). The JSON shows everything: the reservation, the full record, the follow-up I sent that was never answered, and the silent denial.
 
@@ -204,11 +203,11 @@ No explanation for why it doesn't warrant assignment. No technical reasoning. Ju
 
 I was angry when I got that response. I still am. But I think it's important to understand what's happening around this.
 
-The CVE program nearly shut down entirely in April 2025 when CISA's contract with MITRE almost expired. It was saved with a last-minute 11-month extension — the night before it would have gone dark.
+The CVE program nearly shut down entirely in April 2025 when CISA's contract with MITRE almost expired. It was saved with a last-minute 11-month extension, the night before it would have gone dark.
 
-MITRE laid off over 400 employees after the Trump administration cancelled $28 million in contracts. CISA's workforce dropped from roughly 3,400 to 2,400 — losing a third of its staff. The proposed FY2027 budget cuts CISA by another $700 million.
+MITRE laid off over 400 employees after the Trump administration cancelled $28 million in contracts. CISA's workforce dropped from roughly 3,400 to 2,400, losing a third of its staff. The proposed FY2027 budget cuts CISA by another $700 million.
 
-When Eoin told me "we have quite a significant volume of cases right now," It was an understatement. The agencies responsible for coordinating vulnerability disclosure in the United States are being gutted while the number of vulnerabilities keeps growing.
+When Eoin told me "we have quite a significant volume of cases right now," it was an understatement. The agencies responsible for coordinating vulnerability disclosure in the United States are being gutted while the number of vulnerabilities keeps growing.
 
 That doesn't make the outcome acceptable. But it does make it systemic rather than personal.
 
@@ -224,7 +223,7 @@ As of the date of this publication, the `dha-encryption` npm package (v3.3.1) st
 
 The production JavaScript bundles on `mobile.health.mil` still contain this code. The PoC still works.
 
-The bundle hash has changed since my original report — from `index-CEo-9ZJ1.js` to `index-Dad7YiSA.js` — meaning a new build was deployed. But the vulnerable code is identical. You can verify right now:
+The bundle hash has changed since my original report, from `index-CEo-9ZJ1.js` to `index-Dad7YiSA.js`, meaning a new build was deployed. But the vulnerable code is identical. You can verify right now:
 
 ```bash
 curl -sk "https://mobile.health.mil/mobile_apps/mwist/assets/index-Dad7YiSA.js" | grep -oP '.{0,30}h0n3yp0t.{0,30}'
@@ -238,7 +237,6 @@ No CVE was assigned. No advisory was published. No patch has been released. They
 
 ---
 
-
 ## Timeline
 
 | Date | Event |
@@ -250,11 +248,11 @@ No CVE was assigned. No advisory was published. No patch has been released. They
 | June 22, 2026 | Report closed as "Informative" |
 | June 26, 2026 | CVE requested from MITRE CNA-LR |
 | June 26, 2026 | CVE reserved (CAN-2026-2032508), CVSS 7.7 HIGH, IN-CNA-LR-SCOPE |
-| September 7, 2026 | Follow-up to MITRE — no response |
+| September 7, 2026 | Follow-up to MITRE, no response |
 | September 8, 2026 | Report submitted to CERT/CC |
 | September 15, 2026 | CISA confirms findings are legitimate (VU#928288) |
-| October 2, 2026 | MITRE silently denies CVE — no notification sent |
-| October 26, 2026 | CISA disclosure date passes — no response |
+| October 2, 2026 | MITRE silently denies CVE, no notification sent |
+| October 26, 2026 | CISA disclosure date passes, no response |
 | November 2, 2026 | CISA: "Does not warrant CVE assignment" |
 | November 2026 | This writeup published. Vulnerability remains unpatched. |
 
@@ -265,7 +263,7 @@ No CVE was assigned. No advisory was published. No patch has been released. They
 - [dha-encryption on npm](https://www.npmjs.com/package/dha-encryption)
 - [Proof of Concept](https://github.com/AidenMohan/dha-encryption-3.3.1-poc)
 - [OWASP PBKDF2 Recommendations](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#pbkdf2)
-- [NIST SP 800-38D — AES-GCM](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf)
+- [NIST SP 800-38D, AES-GCM](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf)
 
 ---
 
